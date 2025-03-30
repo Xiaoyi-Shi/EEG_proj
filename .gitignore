@@ -1,0 +1,4 @@
+*.fif
+*.bdf
+*.edf
+/__pycache__/
