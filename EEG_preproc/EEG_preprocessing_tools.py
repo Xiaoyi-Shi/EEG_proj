@@ -6,6 +6,8 @@ Created on Tue Mar  4 17:17:47 2025
 """
 import mne
 import os
+import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 
 def prep_set_montages(raw, montage_name, clean_str=None, channel_mapping=None, drop_channel=None, plot=True):
@@ -223,5 +225,34 @@ def prep_muscle_detection(raw, thr=3,filter_freq=[110,124]):
     raw_c.plot(start=5, duration=20)
     
     return raw_c
-    
-    
+
+def prep_anywave_markfile(file_path, sfreq = 1024, mapping=None):
+    """
+    Parameters
+    ----------
+    file_path : str
+        the path of mark file.
+    sfreq : int
+        the sampling frequency.
+    mapping : dict
+        the mapping of annots.
+    --------
+    Returns makers_fin : dataframe(/s)
+        the makers of the mark file.
+    """
+
+    makers = pd.read_csv(file_path, sep='\s+', header=None, encoding='gbk').iloc[1:,:]
+    if mapping:
+        makers.iloc[:,0] = makers.iloc[:,0].map(mapping)
+    makers.iloc[:,2] = makers.iloc[:,2].astype(np.double)
+    makers.iloc[:,3] = makers.iloc[:,3].astype(np.double)
+    makers_fin = makers.iloc[:,[2,3,0]]
+    return makers_fin
+
+
+if __file__ == '__main__':
+    import pandas as pd
+
+    import numpy as np
+    file_path = r"H:\msy\DOC_eeg\raw_data\other\陈爱珍.edf.mrk"
+    makers = pd.read_csv(file_path, sep='\s+', header=None, encoding='gbk')

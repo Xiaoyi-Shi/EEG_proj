@@ -111,71 +111,49 @@ patient_list = [p for p in os.listdir(main_dir) if p.endswith('edf')]
 for i in patient_list:
     file_path = os.path.join(main_dir,i)
     mark_file = file_path +'.mrk'
+    raw = mne.io.read_raw_edf(file_path)
+    raw.info['ch_names']
+    sfreq = raw.info['sfreq']
+    clean_str = ['EEG','-REF','-AVE','-AV_19','-AV','_av',' '] #for 19ch
+    raw, ele_loc = eptool.prep_set_montages(raw, 'standard_1020', clean_str=clean_str,drop_channel='clin_19', plot=False)#19ch
+
     if os.path.exists(mark_file):
-        raw = mne.io.read_raw_edf(file_path)
-        raw.info['ch_names']
-        sfreq = raw.info['sfreq']
-        clean_str = [' ','EEG','-REF','-AV','_av'] #for 19ch
-        raw, ele_loc = eptool.prep_set_montages(raw, 'standard_1020', clean_str=clean_str,drop_channel='clin_19', plot=False)#19ch
-
-        with open(mark_file, 'r', encoding='gbk') as f:
-            lines = f.readlines()
-        onset = []
-        duration = []
-        description = []
-        for line in lines[1:]:
-            description.append(line.split('\t')[0])
-            onset.append(line.split('\t')[2])
-            duration.append(line.split('\t')[3].split('\n')[0])
-
-        event_dict = {np.str_('1'): 1,
-                    np.str_('2'): 2,
-                    np.str_('3'): 3}
-
-        valid_values = ['1', '2', '3']
-        description = [item.replace('枕区节律','1').replace('背景节律','2').replace('纺锤节律','3') for item in description]
-        events = np.array([onset, duration, description]).T
-        events[:, 0] = events[:, 0].astype(np.double) * sfreq
-        events[:, 1] = events[:, 1].astype(np.double) * sfreq
-        events = events[np.isin(events[:, 2], valid_values)].astype(np.double).astype(np.int64)
-        events = events[events[:, 1] != 0]
-
-        saved_files = []
-        for desired_event_id in range(1,4):
-            selected_segments = []
-            for event in events:
-                onset, duration, event_value = event
-                if event_value == event_dict[str(desired_event_id)]:
-                    start_sample = onset
-                    stop_sample = onset + duration
-                    selected_segments.append(raw[:, start_sample:stop_sample][0])
-            
-            # 4. 合并选定的数据片段
-            if selected_segments:
-                concatenated_data = np.concatenate(selected_segments, axis=1)
-                info = raw.info  # 保留原始数据信息
-                new_raw = mne.io.RawArray(concatenated_data, info)
-            
-                # 5. 保存为新的FIF文件
-                if not os.path.exists(os.path.join(file_path.split('.')[0])):
-                    os.makedirs(os.path.join(file_path.split('.')[0]))
-                save_dir = os.path.join(file_path.split('.')[0] ,'all_'+str(desired_event_id)+'.fif')
-                saved_files.append(save_dir)
-                new_raw.save(save_dir, overwrite=True)
-                print(f"拼接后的EEG数据已保存为 {save_dir}")
+        events = eptool.prep_anywave_markfile(mark_file,sfreq)
+        events.columns = ['onset', 'duration', 'description']
+        raw.set_annotations(mne.Annotations(onset=events['onset'],
+                                            duration=events['duration'], 
+                                            description=events['description']))
+    else:
+        events = raw.annotations.to_data_frame(time_format = 'ms')
+        events['onset'] = events['onset']/1000
+    #拼接并保存fif文件
+    desired_event_ids = ['1','2','3','纺锤节律'] # 需要拼接的事件ID
+    for desired_event_id in desired_event_ids:
+        selected_segments = []
+        desired_events = events[events['description'] == desired_event_id]
+        for index, event in desired_events.iterrows():
+            start_sample = event['onset'] * sfreq  # 转换为采样点
+            stop_sample = start_sample + event['duration'] * sfreq  # 计算结束采样点
+            if start_sample < 0 or stop_sample > len(raw.times) or stop_sample <= start_sample:
+                print(f"事件 {desired_event_id} 的时间超出范围，跳过该事件")
+                continue
             else:
-                print(f"未发现标记为 {desired_event_id}的选段")
-'''
-    #写入raw
-    onsets = events[:, 0] / sfreq
-    durations = events[:, 1] / sfreq
-    descriptions = events[:, 2].astype(str)
-
-    annotations = mne.Annotations(onset=onsets,
-                                duration=durations,
-                                description=descriptions)
-    raw.set_annotations(annotations)
-'''
+                selected_segments.append(raw[:, start_sample:stop_sample][0])
+        
+        # 4. 合并选定的数据片段
+        if selected_segments:
+            concatenated_data = np.concatenate(selected_segments, axis=1)
+            info = raw.info  # 保留原始数据信息
+            new_raw = mne.io.RawArray(concatenated_data, info)
+        
+            # 5. 保存为新的FIF文件
+            if not os.path.exists(os.path.join(file_path.split('.')[0])):
+                os.makedirs(os.path.join(file_path.split('.')[0]))
+            save_dir = os.path.join(file_path.split('.')[0] ,'all_'+str(desired_event_id)+'.fif')
+            new_raw.save(save_dir, overwrite=True)
+            print(f"拼接后的EEG数据已保存为 {save_dir}")
+        else:
+            print(f"未发现标记为 {desired_event_id}的选段")
 
 
 
@@ -193,24 +171,12 @@ for i in patient_list:
 
 
 #%% test
-raw_5 = eptool.prep_find_eog(raw_3, 'Fp1')
-raw_5 = eptool.prep_muscle_detection(raw_3)
-raw_4 = eptool.prep_autoICA(raw_3)
+raw_5 = eptool.prep_find_eog(raw, 'Fp1')
+raw_5 = eptool.prep_muscle_detection(raw)
+raw_4 = eptool.prep_autoICA(raw)
 raw_5 = eptool.prep_CSD(raw_4)
 
 #%%
-raw = mne.io.read_raw_bdf(file_path, preload=True)
-raw.rename_channels(channel_mapping) #修改通道名称
-mon_clist = [item.upper() for item in montage.ch_names]
-raw_clist = [item.upper() for item in raw.info.ch_names]
-raw.rename_channels(dict(zip(raw.info.ch_names, raw_clist)))
-difference = [item for item in raw_clist if item not in mon_clist]
-raw.drop_channels(difference)
-
-
-raw.set_montage(montage,match_case=False,on_missing='warn')  #设置通道位置 ，mne.channels.get_builtin_montages() 可以查看montage种类
-raw.drop_channels(['VEOL', 'VEOU', 'HEOL', 'HEOR'])
-
 raw_last_3 = raw.copy().crop(3400,3599)
 ed_data = mne.preprocessing.compute_bridged_electrodes(raw_last_3)
 bridged_idx, ed_matrix = ed_data
