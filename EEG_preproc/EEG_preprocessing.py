@@ -10,8 +10,10 @@ import mne
 import matplotlib.pyplot as plt
 import numpy as np
 import EEG_preprocessing_tools as eptool
-%matplotlib qt5
+#%matplotlib qt5
 
+
+#%%
 main_dir = r'F:\Temp\HEEG预处理'
 patient_list = [p for p in os.listdir(main_dir) if p.endswith('bdf')]
 file_path = os.path.join(main_dir, patient_list[0])
@@ -155,58 +157,22 @@ for i in patient_list:
         else:
             print(f"未发现标记为 {desired_event_id}的选段")
 
+#%% -----拼接多个edf文件-----
 
+data_dir = r"H:\msy\小论文_DOC_SBM_EEG\data_00_EEGraw\脑干慢波EDF"
+output_dir = r"H:\msy\小论文_DOC_SBM_EEG\data_00_EEGraw"
 
+files = os.listdir(data_dir)
+trans_table = str.maketrans('', '', '0123456789')
+patient_prefixs_d = [s.translate(trans_table)[0:-4] for s in files]
+patient_prefixs = list(set(patient_prefixs_d))
 
-
-
-
-
-
-
-
-
-
-
-
-
-#%% test
-raw_5 = eptool.prep_find_eog(raw, 'Fp1')
-raw_5 = eptool.prep_muscle_detection(raw)
-raw_4 = eptool.prep_autoICA(raw)
-raw_5 = eptool.prep_CSD(raw_4)
-
-#%%
-raw_last_3 = raw.copy().crop(3400,3599)
-ed_data = mne.preprocessing.compute_bridged_electrodes(raw_last_3)
-bridged_idx, ed_matrix = ed_data
-mne.viz.plot_bridged_electrodes(
-    raw.info,
-    bridged_idx,
-    ed_matrix,
-    title="Bridged Electrodes",
-    topomap_args=dict(vlim=(None, 5)),
-)
-
-threshold_muscle = 5  
-annot_muscle, scores_muscle = mne.preprocessing.annotate_muscle_zscore(
-    raw_last_3,
-    ch_type="eeg",
-    threshold=threshold_muscle,
-    min_length_good=0.2,
-    filter_freq=[110, 140],
-)
-fig, ax = plt.subplots()
-ax.plot(raw_last_3.times, scores_muscle)
-ax.axhline(y=threshold_muscle, color="r")
-ax.set(xlabel="time, (s)", ylabel="zscore", title="Muscle activity")
-order = np.arange(144, 164)
-raw.set_annotations(annot_muscle)
-raw.plot(start=5, duration=20, order=order)
-
-#%%
-raw.set_eeg_reference(ref_channels='average')       #2-设置平均参考
-#%%
-mne.viz.plot_sensors
-
-mne.plot_sensors()
+for patient_prefix in patient_prefixs:
+    file_list = [os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.startswith(patient_prefix) and f.endswith('.edf')]
+    file_list.sort(key=lambda x: int(os.path.basename(x).split(patient_prefix)[1].split('.edf')[0]))
+    raw_comb = eptool.concatenate_edf_files(file_list)
+    raw_combb = eptool.mark_bad_around_labels(raw_comb.copy(), target_labels=['BAD boundary'], buffer_sec=0.5, bad_label='bad')
+    raw_combb.plot()
+    raw_combb.compute_psd().plot()
+    raw_combb.export(os.path.join(output_dir, patient_prefix+'.edf'), overwrite=True)
+# %%

@@ -249,6 +249,124 @@ def prep_anywave_markfile(file_path, sfreq = 1024, mapping=None):
     makers_fin = makers.iloc[:,[2,3,0]]
     return makers_fin
 
+def concatenate_edf_files(file_paths):
+    """
+    Concatenates a list of EDF files into a single MNE Raw object.
+    
+    Parameters:
+    -----------
+    file_paths : list of str
+        List of paths to EDF files to concatenate in order.
+    
+    Returns:
+    --------
+    raw : mne.io.Raw
+        The concatenated Raw object.
+    
+    Notes:
+    ------
+    This function assumes all EDF files have compatible parameters (e.g., same sampling rate and channels).
+    It reports key parameters for each file during loading.
+    """
+    if not file_paths:
+        raise ValueError("file_paths list cannot be empty.")
+    
+    raws = []
+    for i, path in enumerate(file_paths, start=1):
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"File not found: {path}")
+        
+        print(f"Loading file {i}: {path}")
+        raw = mne.io.read_raw_edf(path, preload=True)
+        
+        # Report key parameters
+        print(f"  Sampling frequency: {raw.info['sfreq']:.2f} Hz")
+        print(f"  Number of channels: {len(raw.info['ch_names'])} channels: {raw.info['ch_names']}")
+        print(f"  Duration: {raw.times[-1]:.2f} seconds")
+        print("-" * 50)
+        
+        raws.append(raw)
+    
+    # Concatenate all Raw objects
+    concatenated_raw = mne.concatenate_raws(raws)
+    
+    print(f"Concatenation complete. Total duration: {concatenated_raw.times[-1]:.2f} seconds")
+    
+    return concatenated_raw
+
+def mark_bad_around_labels(raw, target_labels, buffer_sec=1.0, bad_label='BAD'):
+    """
+    在 raw 对象的 annotations 中，针对指定标签的前后 buffer_sec 秒标记为坏段。
+    
+    Parameters:
+    -----------
+    raw : mne.io.Raw
+        输入的 Raw 对象，必须包含 annotations。
+    
+    target_labels : list of str
+        要针对的标签列表，例如 ['seizure_start', 'artifact']。
+    
+    buffer_sec : float, default=1.0
+        前后缓冲秒数。
+    
+    bad_label : str, default='BAD'
+        坏段的描述标签（MNE 默认坏段标签）。
+    
+    Returns:
+    --------
+    raw : mne.io.Raw
+        修改后的 Raw 对象（annotations 已更新）。
+    
+    Notes:
+    ------
+    - 该函数会扩展每个匹配标签的 annotation 时间范围（onset - buffer 到 onset + duration + buffer）。
+    - 新坏段会合并到现有 annotations 中（使用 + 操作符，MNE 会自动处理重叠）。
+    - 如果 raw 没有 annotations，会自动创建。
+    - 确保缓冲不超出数据边界（起始时间 >=0）。
+    """
+    if not hasattr(raw, 'annotations') or raw.annotations is None:
+        raw.set_annotations(mne.Annotations([], [], orig_time=raw.info['meas_date']))
+    
+    ann = raw.annotations
+    matching_indices = [i for i, desc in enumerate(ann.description) if desc in target_labels]
+    
+    if not matching_indices:
+        print("未找到匹配的标签，跳过标记。")
+        return raw
+    
+    new_onsets = []
+    new_durations = []
+    new_descriptions = []
+    
+    for i in matching_indices:
+        onset = ann.onset[i]
+        duration = ann.duration[i]
+        
+        # 计算扩展范围
+        start = max(0.0, onset - buffer_sec)
+        end = onset + duration + buffer_sec
+        new_dur = end - start
+        
+        new_onsets.append(start)
+        new_durations.append(new_dur)
+        new_descriptions.append(bad_label)
+    
+    # 创建新的坏段 annotations
+    bad_ann = mne.Annotations(
+        onset=new_onsets,
+        duration=new_durations,
+        description=new_descriptions,
+        orig_time=ann.orig_time
+    )
+    
+    # 合并到现有 annotations（MNE 会处理重叠）
+    updated_ann = ann + bad_ann
+    raw.set_annotations(updated_ann)
+    
+    print(f"已标记 {len(matching_indices)} 个标签的前后 {buffer_sec} 秒为坏段。")
+    print(f"总坏段数量: {sum(1 for d in updated_ann.description if d == bad_label)}")
+    
+    return raw
 
 if __file__ == '__main__':
     import pandas as pd
