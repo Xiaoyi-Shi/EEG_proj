@@ -175,4 +175,13 @@ for patient_prefix in patient_prefixs:
     raw_combb.plot()
     raw_combb.compute_psd().plot()
     raw_combb.export(os.path.join(output_dir, patient_prefix+'.edf'), overwrite=True)
-# %%
+
+#%% -----应用matlab计算出的bad segment(code_00_EEGproc.m的输出)标记到raw中-----
+bad_seg = np.loadtxt("badseg.csv", delimiter=',', dtype=int)
+sfreq = raw.info['sfreq']
+start_samples = bad_seg[:, 0]  # 起始采样点
+end_samples = bad_seg[:, 1]    # 结束采样点
+onsets = start_samples / sfreq
+durations = (end_samples+250 - start_samples) / sfreq # 持续时间，假设每个坏段多加1秒（250个采样点）
+raw.annotations.append(onsets, durations, 'bad')
+raw.plot(duration=40,overview_mode = 'zscore')
